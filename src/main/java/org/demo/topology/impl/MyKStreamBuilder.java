@@ -1,5 +1,8 @@
 package org.demo.topology.impl;
 
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsConfig;
@@ -46,20 +49,64 @@ public class MyKStreamBuilder {
         KafkaStreams streams = new KafkaStreams(builder, config);
         // Start the Kafka Streams instance
         streams.start();
+
+        // Now generate the data and write to the topic.
+        Properties producerConfig = new Properties();
+        producerConfig.put("bootstrap.servers", "localhost:9092");
+        producerConfig.put("key.serializer",
+                "org.apache.kafka.common" +
+                        ".serialization.StringSerializer");
+        producerConfig.put("value.serializer",
+                "org.apache.kafka.common" +
+                        ".serialization.StringSerializer");
+
+        KafkaProducer producer =
+                new KafkaProducer<String, Long>(producerConfig);
+
+        doAgg(source1);
+
+        producer.send(new ProducerRecord("topic1","hello","1"));
+        producer.send(new ProducerRecord("topic1","world","1"));
+        producer.send(new ProducerRecord("topic1","hey","1"));
+        producer.send(new ProducerRecord("topic1","jack","1"));
+
     }
 
 
-    public static void processStreamWithDSL(KStream source1, KTable source2) {
+    public static void doAgg(KStream source1) {
         /**
          * Aggregate
          */
         // written in Java 8+, using lambda expressions
+//        KTable<Windowed<String>, Long> counts = source1.groupByKey().aggregate(
+//                () -> 0L,  // initial value
+//                (aggKey, value, aggregate) -> (Long)aggregate + 1L,   // aggregating value
+//                TimeWindows.of(/*"counts", */5000L).advanceBy(1000L), // intervals in milliseconds
+//                Serdes.Long() // serde for aggregated value
+//        );
+
         KTable<Windowed<String>, Long> counts = source1.groupByKey().aggregate(
-                () -> 0L,  // initial value
-                (aggKey, value, aggregate) -> (Long)aggregate + 1L,   // aggregating value
+                new Initializer() {
+                    @Override
+                    public Object apply() {
+                        return 1L;
+                    }
+                },
+                new Aggregator() {
+                    @Override
+                    public Object apply(Object key, Object value, Object aggregate) {
+                        return Long.valueOf(aggregate.toString()) + 1L;
+                    }
+                },
                 TimeWindows.of(/*"counts", */5000L).advanceBy(1000L), // intervals in milliseconds
                 Serdes.Long() // serde for aggregated value
         );
+
+        counts.to("topic1-output");
+    }
+
+    public static void processStreamWithDSL(KStream source1, KTable source2) {
+
 
         /**
          * Join
